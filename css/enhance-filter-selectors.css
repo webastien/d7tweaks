@@ -1,0 +1,6 @@
+/* WYSIWYG enhancements */
+.text-format-wrapper > .form-type-select { padding-top: 0; text-align: right; }
+.text-format-wrapper > .form-type-select > label { display: inline-block; margin-right: 5px; }
+.text-format-wrapper > .form-type-select > label,
+.text-format-wrapper > .form-type-select > select { font-size: 0.8em; padding: 0; }
+

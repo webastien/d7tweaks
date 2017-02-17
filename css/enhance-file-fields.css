@@ -1,0 +1,16 @@
+form .sebd7tweaks-file,
+#imce-content form .sebd7tweaks-file {
+  background:      #FFF;
+  border:          1px solid #CCC;
+  color:           #000;
+  cursor:          pointer;
+  display:         inline-block;
+  overflow:        hidden;
+  padding:         0.5em;
+  text-decoration: none;
+  vertical-align:  top;
+  white-space:     nowrap;
+}
+form .sebd7tweaks-file.no-linked-file,
+#imce-content form .sebd7tweaks-file.no-linked-file { color: #CCC; }
+

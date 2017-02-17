@@ -1,0 +1,11 @@
+#linkit-modal #edit-linkit-attributes { border: none; margin: 0; padding: 0; }
+#linkit-modal #edit-linkit-attributes legend { display: none; }
+#linkit-modal #edit-linkit-attributes .fieldset-wrapper { padding: 0; }
+#linkit-modal #edit-linkit-attributes .fieldset-wrapper .form-item { float: none; margin: 0; width: auto; }
+#linkit-modal #edit-linkit-attributes .fieldset-wrapper .form-item input.form-text {
+  font-size: 1em;
+  height:    2em;
+  padding:   3px 25px 3px 5px;
+  width:     440px;
+}
+

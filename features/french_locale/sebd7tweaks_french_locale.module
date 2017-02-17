@@ -1,0 +1,7 @@
+<?php
+/**
+ * @file
+ * Code for the sebd7tweaks french locale feature.
+ */
+
+include_once 'sebd7tweaks_french_locale.features.inc';

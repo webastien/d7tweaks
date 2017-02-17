@@ -1,0 +1,5 @@
+.defaultSkin .mceToolbar .mceSplitButton { width: auto; }
+table.mceToolbar { width: 100% !important; }
+/* If DND support of scald is activated, ensure media selector stay visible in full screen */
+.dnd-library-wrapper { z-index: 200001; }
+

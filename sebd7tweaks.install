@@ -1,0 +1,30 @@
+<?php
+/**
+ * Implements hook_install().
+ */
+function sebd7tweaks_install() {
+  $disabled = array();
+  // Create a list of menus to disable by default
+  foreach (menu_get_menus(TRUE) as $name => $menu) {
+    foreach (array('list', 'edit', 'delete', 'item_add', 'item_edit', 'item_reset', 'item_delete') as $action) {
+      if (($action == 'delete' && $name == 'main-menu') || in_array($name, array('devel', 'management', 'navigation', 'user-menu'))) {
+        $disabled["{$name}__$action"] = "{$name}__$action";
+      }
+    }
+  }
+  // Store this list
+  variable_set('sebd7tweaks_disabled_menu_actions', $disabled);
+  // Uninstall modules we do not want
+  if (($modules = array_filter(array('color', 'dashboard', 'help', 'shortcut', 'toolbar'), 'module_exists')) && count($modules) > 1) {
+    module_disable($modules);
+    drupal_uninstall_modules($modules);
+  }
+}
+
+/**
+ * Implements hook_uninstall().
+ */
+function sebd7tweaks_uninstall() {
+  db_query("DELETE FROM {variable} WHERE name LIKE 'sebd7tweaks_%%'");
+}
+

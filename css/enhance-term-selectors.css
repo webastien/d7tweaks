@@ -1,0 +1,12 @@
+.field-type-taxonomy-term-reference > .form-item > .field-suffix a,
+.field-type-taxonomy-term-reference > .form-item > .field-suffix a:link,
+.field-type-taxonomy-term-reference > .form-item > .field-suffix a:visited {
+  background:  url(/modules/contextual/images/gear-select.png) no-repeat -2px 0;
+  display:     inline-block;
+  height:      16px;
+  overflow:    hidden;
+  text-indent: -5000px;
+  width:       16px;
+}
+.field-type-taxonomy-term-reference > .form-item > .field-suffix a:hover { background-position: -2px -18px; }
+

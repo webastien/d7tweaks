@@ -1,0 +1,29 @@
+name        = Seb Drupal 7 tweaks
+description = Configurable common tweaks and fix / enhancements for Drupal 7 modules
+package     = WIP
+core        = 7.x
+; Some of those dependencies are not really required, because this module's code doesn't depend on them,
+; but as they are "must have" and will be installed on our projects, include them here simplify installations
+dependencies[] = admin_menu
+dependencies[] = admin_menu_toolbar
+dependencies[] = sebd7tweaks_french_locale
+dependencies[] = contact
+dependencies[] = fpa
+dependencies[] = field
+dependencies[] = field_group
+dependencies[] = filter
+dependencies[] = l10n_update
+dependencies[] = linkit
+dependencies[] = logintoboggan
+dependencies[] = menu
+dependencies[] = pathauto
+dependencies[] = pathologic
+dependencies[] = role_delegation
+dependencies[] = subpathauto
+dependencies[] = taxonomy
+dependencies[] = transliteration
+dependencies[] = user
+dependencies[] = views
+dependencies[] = wysiwyg
+dependencies[] = wysiwyg_button_order
+

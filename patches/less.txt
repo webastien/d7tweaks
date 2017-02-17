@@ -1,0 +1,30 @@
+<?php
+/**
+ * @file: /sites/all/themes/omega/alpha/template.php
+ * (or equivalent place if the theme is not installed in default location).
+ */
+
+/**
+ * Implements hook_element_info_alter().
+ */
+function alpha_element_info_alter(&$elements) {
+  if (variable_get('preprocess_css', FALSE) && (!defined('MAINTENANCE_MODE') || MAINTENANCE_MODE != 'update')) {
+    ##############################################################
+    ## PATCH REQUIRED TO FIX OMEGA RESPONSIVE WITH LESS (begin) ##
+    ##############################################################
+    /*******************************************************************************
+     * https://drupal.org/files/preprocess-aggregation-1627478-14.patch
+     * REF: https://drupal.org/node/1627478#comment-6698812
+     * SRC: https://drupal.org/node/1823250 (official documentation of the module)
+     *******************************************************************************/
+    ##### This line has to be removed
+    // array_unshift($elements['styles']['#pre_render'], 'alpha_css_preprocessor');
+    ##### Those lines have to be added
+    $core_pre_render_pos = array_search('drupal_pre_render_styles', $elements['styles']['#pre_render']);
+    array_splice($elements['styles']['#pre_render'], $core_pre_render_pos, 0, 'alpha_css_preprocessor');
+    ############################################################
+    ## PATCH REQUIRED TO FIX OMEGA RESPONSIVE WITH LESS (end) ##
+    ############################################################
+  }
+}
+

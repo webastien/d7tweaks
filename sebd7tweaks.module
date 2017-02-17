@@ -1,0 +1,636 @@
+<?php
+##### Load parts of code from other files (splitted for an easier maintenance)
+require_once 'sebd7tweaks.fapi.inc';
+
+###################################
+# Main sebd7tweaks's API function #
+###################################
+
+/**
+ * sebd7tweaks API: Main function to load the appropriate files and call the requested function.
+ *
+ * @param   $plugin    Name of the plugin (see "plugins" directory)
+ * @param   $callback  API name of the callback to use (not a full function name, simply "callback" for "sebd7tweaks_API_<plugin>_<callback>")
+ * @param   ...        A list of arguments used by the callback
+ *
+ * @return  mixed      Result of the callback function
+ */
+function sebd7tweaks($plugin, $callback) {
+  $args = array_slice(func_get_args(), 2);
+  array_unshift($args, 'sebd7tweaks', "plugins/$plugin", "API_{$plugin}_$callback");
+
+  return call_user_func_array('sebd7tweaks_call', $args);
+}
+
+/**
+ * sebd7tweaks API: Call a function in a specific file relative to the given module.
+ *
+ * example: sebd7tweaks_call('foo', 'foo.bar', 'baz', 'qux', 'fum')
+ *          will try to load <drupal path to foo>/foo.bar.inc and, if success, to call foo_baz('qux', 'fum') and return its result.
+ *
+ * @param   $module    Name of the module where the file is located
+ * @param   $filename  Name of the file which contains the callback
+ * @param   $callback  Name of the callback without module prefix
+ * @param   ...        A list of arguments used by the callback
+ *
+ * @return  mixed      Result of the callback function
+ */
+function sebd7tweaks_call($module, $filename, $callback) {
+  $callback = "{$module}_$callback";
+  // The requested file and function are supposed to exists, but to prevent errors...
+  // + _sebd7tweaks_settings_form_module_features() takes advantage of this security to have an easier code.
+  return (module_load_include('inc', $module, $filename) && function_exists($callback))?
+          call_user_func_array($callback, array_slice(func_get_args(), 3)): FALSE;
+}
+
+/**
+ * sebd7tweaks API: Check if the given feature is enabled.
+ *
+ * @param   $feature  Name of the feature has defined in "sebd7tweaks_features" variable
+ *                    (should be one of those keys, otherwise always return TRUE).
+ *                    @see sebd7tweaks_settings_form()
+ *
+ * @return  boolean   TRUE if the feature is activated / FALSE otherwise
+ */
+function sebd7tweaks_feature($feature) {
+  static $features = FALSE;
+  // If the variable is not defined, all features are considered as enabled
+  if ($features === FALSE) {
+    $features = variable_get('sebd7tweaks_features', array());
+  }
+
+  if (count($features) == 0) {
+    return TRUE;
+  }
+
+  return (boolean) @$features[$feature];
+}
+
+#########################
+# Hooks implementations #
+#########################
+
+##### Hooks relative to module ADMIN_MENU
+
+/**
+ * Implements hook_admin_menu_map().
+ */
+function sebd7tweaks_admin_menu_map() {
+  // Code grab from taxonomy implementation (in admin_menu files, not in taxonomy ones) to let it works with both permissions
+  if (user_access('administer taxonomy') || user_access('access taxonomy overview')) {
+    return array(
+      'admin/structure/taxonomy/%taxonomy_vocabulary_machine_name' => array(
+        'parent'    => 'admin/structure/taxonomy',
+        'arguments' => array(array('%taxonomy_vocabulary_machine_name' => array_keys(taxonomy_vocabulary_get_names()))),
+      ),
+    );
+  }
+}
+
+/**
+ * Implements hook_admin_menu_output_alter().
+ */
+function sebd7tweaks_admin_menu_output_alter(&$content) {
+  require_once 'sebd7tweaks.admin_menu.inc';
+  _sebd7tweaks_admin_menu_alter($content);
+}
+
+##### Hooks relative to module BLOCK
+
+/**
+ * Implements hook_block_info().
+ */
+function sebd7tweaks_block_info() {
+  return array(
+    'contact' => array('info' => t('Contact form'), 'cache' => DRUPAL_NO_CACHE),
+  );
+}
+
+/**
+ * Implements hook_block_info_alter().
+ */
+function sebd7tweaks_block_info_alter(&$blocks, $theme, $code_blocks) {
+  if (sebd7tweaks_feature('views.enhance_block_name') && isset($blocks['views'])) {
+    $blocks['views'] = sebd7tweaks('views', 'alter_blocks', $blocks['views']);
+  }
+}
+
+/**
+ * Implements hook_block_view().
+ */
+function sebd7tweaks_block_view($delta = '') {
+  if ($delta == 'contact' && arg(0) != 'contact' && user_access('access site-wide contact form')) {
+    module_load_include('inc', 'contact', 'contact.pages');
+
+    if (($default = variable_get('sebd7tweaks_contact_label_hidden', FALSE)) && $default['block']) {
+      drupal_add_js(drupal_get_path('module', 'sebd7tweaks') .'/js/enhance-contact-form.js');
+    }
+
+    return array('subject' => t('Contact form'), 'content' => drupal_get_form('contact_site_form'));
+  }
+}
+
+/**
+ * Implements hook_block_view_MODULE_DELTA_alter().
+ */
+function sebd7tweaks_block_view_book_navigation_alter(&$data, $block) {
+  if (sebd7tweaks_feature('book.ordered_books') && variable_get('sebd7tweaks_books_weights', FALSE)) {
+    foreach (array_keys(sebd7tweaks('book', 'get_books')) as $bid) {
+      $book = $data['content'][$bid];
+      unset($data['content'][$bid]);
+      $data['content'][$bid] = $book;
+    }
+  }
+}
+
+/**
+ * Implements hook_block_view_MODULE_DELTA_alter().
+ */
+function sebd7tweaks_block_view_revisioning_pending_alter(&$data, $block) {
+  if ($data && sebd7tweaks_feature('revisioning.more_logic_block')) {
+    if (user_access('publish revisions')) {
+      // The replace of empty h3 tag is because the module use title='' with theme('item_list')... So useless! (and not semantic)
+      $data['content'] = str_replace('<h3></h3>', '', $data['content']) . $data['subject'];
+      unset($data['subject']);
+    }
+    // Why display this block to users which cannot publish pending revision???
+    else {
+      unset($data['content']);
+    }
+  }
+}
+
+##### Hooks relative to module CONTEXTUAL
+
+/**
+ * Implements hook_menu_contextual_links_alter().
+ */
+function sebd7tweaks_menu_contextual_links_alter(&$links, $router_item, $root_path) {
+  if (sebd7tweaks_feature('contextual.simplify') && user_access('access contextual links')) {
+    foreach ($links as $name => &$link) {
+      switch ($name) {
+        case 'menu-edit':
+        case 'node-delete': unset($links[$name]); break;
+        case 'menu-list': $links[$name]['title'] = t('Edit menu'); break;
+      }
+    }
+  }
+}
+
+##### Hooks relative to module DATE_POPUP
+
+/**
+ * Implements hook_date_popup_process_alter().
+ */
+function sebd7tweaks_date_popup_process_alter(&$element, &$form_state, $context) {
+  // Users are not so stupid!
+  if (sebd7tweaks_feature('date_popup.remove_useless_description')) {
+    foreach (array('date', 'time') as $key) {
+      unset($element[$key]['#description']);
+    }
+  }
+}
+
+##### Relative to FIELD
+
+/**
+ * Implements of hook_element_info_alter().
+ */
+function sebd7tweaks_element_info_alter(&$type) {
+  // Code strongly inspired by "better_formats" module
+  array_splice($type['text_format']['#process'], array_search('filter_process_format', $type['text_format']['#process']), 1,
+    array('filter_process_format', 'sebd7tweaks_filter_process_format'));
+  // Enhance the display of password confirm fields
+  if (sebd7tweaks_feature('user.enhance_pass_fields')) {
+    $type['password_confirm']['#process'][] = 'sebd7tweaks_enhance_password_confirm_process';
+  }
+  // Hide end date visibility checkbox for fields including this option
+  if (isset($type['date_combo']['#process']) && sebd7tweaks_feature('date.combo_end_date')) {
+    $type['date_combo']['#process'][] = 'sebd7tweaks_date_combo_element_process';
+  }
+}
+
+/**
+ * Implements hook_field_widget_form_alter().
+ */
+function sebd7tweaks_field_widget_form_alter(&$element, &$form_state, $context) {
+  switch ($context['field']['type']) {
+    case 'number_float':
+    case 'number_decimal':
+    case 'number_integer':          $element = sebd7tweaks('fapi', 'widget_number', $element, $context); break;
+    case 'google_map_field':
+    case 'taxonomy_term_reference': $element = sebd7tweaks('fapi', 'widget_'. $context['field']['type'], $element, $context); break;
+  }
+}
+
+##### Hooks relative to FOLLOW
+
+/**
+ * Implements hook_follow_networks_alter().
+ */
+function sebd7tweaks_follow_networks_alter(&$networks, $uid = 0) {
+  // Famous social links not included by default, also @see sebd7tweaks_init().
+  $networks[$uid]['dailymotion'] = array('title' => 'Dailymotion', 'domain' => 'dailymotion.com');
+  $networks[$uid]['googleplus']  = array('title' => 'Google+',     'domain' => 'plus.google.com');
+  $networks[$uid]['viadeo']      = array('title' => 'Viadeo',      'domain' => 'viadeo.com');
+  $networks[$uid]['mixcloud']    = array('title' => 'MixCloud',    'domain' => 'mixcloud.com');
+  $networks[$uid]['spotify']     = array('title' => 'Spotify',     'domain' => 'spotify.com');
+}
+
+##### Hooks relative to module HELP
+
+/**
+ * Implements hook_help().
+ */
+function sebd7tweaks_help($path, $arg) {
+  if ( $arg[0] == 'admin' && $arg[1] == 'structure' && $arg['2'] == 'block' && (empty($arg[3]) || $arg[3] == 'list')
+    && sebd7tweaks_feature('block.hide_help') && user_access('access demo regions link')
+  ) {
+    $themes     = list_themes();
+    $demo_theme = !empty($arg[4])? $arg[4]: variable_get('theme_default', 'bartik');
+
+    return l(t('Demonstrate block regions (@theme)',
+            array('@theme' => $themes[$demo_theme]->info['name'])), 'admin/structure/block/demo/'. $demo_theme);
+  }
+}
+
+##### Hooks relative to LINKIT
+
+/**
+ * Implements hook_linkit_attributes_alter().
+ */
+function sebd7tweaks_linkit_attributes_alter(&$attributes) {
+  // Linkit attributes doesn't use t() function for their title... + all in lowercase
+  if (sebd7tweaks_feature('linkit.fix_attributes')) {
+    foreach ($attributes as &$attribute) {
+      $attribute['#title'] = t(ucfirst($attribute['#title']));
+    }
+  }
+}
+
+##### Hooks relative to module MENU
+
+/**
+ * Implements hook_menu().
+ */
+function sebd7tweaks_menu() {
+  require_once 'sebd7tweaks.menu.inc';
+  return _sebd7tweaks_menu();
+}
+
+/**
+ * Implements hook_menu_alter().
+ */
+function sebd7tweaks_menu_alter(&$items) {
+  require_once 'sebd7tweaks.menu.inc';
+  _sebd7tweaks_menu_alter($items);
+}
+
+##### Hooks relative to module NODE
+
+/**
+ * Implements hook_node_view().
+ */
+function sebd7tweaks_node_view($node, $view_mode, $langcode) {
+  if (sebd7tweaks_feature('sharethis.fix_view_mode') && function_exists('sharethis_node_view')) {
+    // Sharethis consider all view modes except teaser are full view mode!!!
+    if (!variable_get('sharethis_teaser_option', FALSE) || $view_mode == 'full') {
+      sharethis_node_view($node, $view_mode, $langcode);
+    }
+  }
+  // Can't be in hook_menu_alter() to manage different cases:
+  // - could be with core standard without problems, by removing the 2nd page arguments
+  // - could be with revisioning module by replace the callback by node_show()
+  // - CANNOT with ds which implements drupal_set_title() in the function containing its logic.
+  if ($view_mode == 'full' && sebd7tweaks_feature('node.revs_title') && arg(2) == 'revisions' && drupal_get_title() != $node->title) {
+    drupal_set_title($node->title);
+  }
+}
+
+##### Hooks relative to module SCALD
+
+/**
+ * Implements hook_scald_prerender().
+ */
+function sebd7tweaks_scald_prerender($atom, $context, $options, $mode) {
+  if ($mode == 'transcoder' && $context = 'sdl_library_item' && file_uri_scheme($atom->thumbnail_source) != '') {
+    $atom->rendered->file_transcoded_url = image_style_url('thumbnail', $atom->thumbnail_source);
+  }
+}
+
+/**
+ * Implements hook_scald_transcoders().
+ */
+function sebd7tweaks_scald_transcoders() {
+  return array(
+    // Transcoder to fix the bug on default transcoder with audio files... (thumbnails doesn't appear). @see sebd7tweaks_scald_prerender().
+    'fixed_audio' => array(
+      'title'       => t('Fixed audio'),
+      'description' => t('Fix the default transcoder for audio atoms'),
+      'formats'     => array('audio' => 'passthrough'),
+    ),
+  );
+}
+
+##### Hooks relative to module SYSTEM
+
+/**
+ * Implementation of hook_init().
+ */
+function sebd7tweaks_init() {
+  $path = drupal_get_path('module', 'sebd7tweaks');
+  // @see sebd7tweaks_follow_networks_alter()
+  if (module_exists('follow')) {
+    drupal_add_css("$path/css/enhance-follow.css");
+  }
+  // Fix full screen toolbar for MCE which pass on 2 lines without this
+  if (module_exists('wysiwyg')) {
+    drupal_add_css("$path/css/fix-tinymce-fullscreen.css");
+  }
+}
+
+/**
+ * Implements hook_module_implements_alter().
+ */
+function sebd7tweaks_module_implements_alter(&$implementations, $hook) {
+  switch ($hook) {
+    // Our own implementation cover it
+    case 'admin_menu_map': unset($implementations['taxonomy']); break;
+    // Too much options make the UI boring...
+    case 'contextual_links_view_alter':
+      if (sebd7tweaks_feature('ds.remove_contextual')) {
+        unset($implementations['ds']);
+      }
+      break;
+    // Place our implementations after all others
+    case 'form_alter': unset($implementations['sebd7tweaks']); $implementations['sebd7tweaks'] = FALSE; break;
+    // Hide some helps disturbing for editors
+    case 'help': // For "block", @see sebd7tweaks_help()
+      foreach (array('block', 'taxonomy') as $module) {
+        if (sebd7tweaks_feature("$module.hide_help")) {
+          unset($implementations[$module]);
+        }
+      }
+      break;
+    // @see sebd7tweaks_node_view()
+    case 'node_view': unset($implementations['sharethis']); break;
+    // Do not hide blocks on denied pages...
+    case 'page_alter':
+      if (sebd7tweaks_feature('logintoboggan.denied_page_blocks')) {
+        unset($implementations['logintoboggan']);
+      }
+      break;
+  }
+}
+
+/**
+ * Implements hook_permission().
+ */
+function sebd7tweaks_permission() {
+  return array(
+    'access demo regions link'        => array('title' => t('View and use the demo regions links')),
+    'access taxonomy overview'        => array('title' => t('View the taxonomy overview page (require activation of simplified page)')),
+    'manage own contact form'         => array('title' => t('Manage activation of own personal contact form')),
+    'administer basic site infos'     => array('title' => t('Administer basic site informations')),
+    'administer sebd7tweaks settings' => array('title' => t("Administer sebd7tweaks module's features and settings")),
+    'administer people settings'      => array('title' => t('Administer people settings (fields, ...)')),
+    'administer admin blocks'         => array('title' => t('Administer blocks of the admin theme'),
+      'description' => t('As no effect if the admin theme is the default one for users with permission %permission.', array('%permission' => t('Administer blocks'))),
+    ),
+  );
+}
+
+/**
+ * Implements hook_theme().
+ */
+function sebd7tweaks_theme() {
+  return array(
+    'sebd7tweaks_settings_menu_actions'       => array('file' => 'sebd7tweaks.admin_pages.inc', 'render element' => 'element'),
+    'sebd7tweaks_cancel_account_request_form' => array('file' => 'sebd7tweaks.admin_pages.inc', 'render element' => 'form'),
+    'sebd7tweaks_book_admin_overview_form'    => array('file' => 'sebd7tweaks.admin_pages.inc', 'render element' => 'form'),
+    'sebd7tweaks_contact_full_page_form'      => array('file' => 'sebd7tweaks.pages.inc',       'render element' => 'form', 'template' => 'templates/contact-form-full-page'),
+  );
+}
+
+/**
+ * Implements hook_theme_registry_alter().
+ */
+function sebd7tweaks_theme_registry_alter(&$theme_registry) {
+  $keys = array();
+
+  if (sebd7tweaks_feature('file.themable_input')) {
+    $keys[] = 'file';
+  }
+
+  if (sebd7tweaks_feature('text.html5_additions')) {
+    foreach (array('password', 'textarea', 'textfield') as $key) {
+      $keys[] = $key;
+    }
+  }
+
+  foreach ($keys as $key) {
+    if (isset($theme_registry[$key]) && function_exists("sebd7tweaks_preprocess_$key")) {
+      $theme_registry[$key]['preprocess_functions'][] = "sebd7tweaks_preprocess_$key";
+    }
+  }
+}
+
+/**
+ * Implements hook_mail().
+ */
+function sebd7tweaks_mail($key, &$message, $params) {
+  $variables = array();
+  $replace   = array();
+
+  switch ($key) {
+    case 'cancel_account_request':
+      $variables = array('user' => $params['account']);
+      $replace   = array('[cancel-request-comment]' => $params['comment']);
+      break;
+
+    default: return;
+  }
+
+  if ($texts = sebd7tweaks('mail', 'get_texts', 'sebd7tweaks', $key, $variables, $message['language'])) {
+    $message['subject'] = $texts['subject'];
+    $message['body'][]  = strtr($texts['body'], $replace);
+  }
+}
+
+/**
+ * Implements hook_js_alter().
+ */
+function sebd7tweaks_js_alter(&$javascript) {
+  $module = drupal_get_path('module', 'sebd7tweaks');
+  // contextual is a core module, so directly use the path instead of drupal_get_path() for better performances
+  if (sebd7tweaks_feature('contextual.simplify') && isset($javascript['modules/contextual/contextual.js'])) {
+    // This simplify contextual links usage when there is a single possibility
+    drupal_add_js("$module/js/enhance-contextual.js");
+    // I will not create a file for a lonely css instruction + we are into the back-office + Drupal manage inline css well, so it's OK for me.
+    drupal_add_css('a.contextual-links-trigger.single-option { width: 14px; }', 'inline');
+  }
+  // Fix tinyMCE plugin fullscreen which is behind admin_menu + buttons on 2 lines instead of 1
+  if (isset($javascript[drupal_get_path('module', 'wysiwyg') .'/wysiwyg.js']) && user_access('access administration menu')) {
+    drupal_add_js("$module/js/fix-tinymce-fullscreen.js");
+  }
+  // Fix jcarousel bug https://github.com/jsor/jcarousel/issues/64
+  if (module_exists('jcarousel') && sebd7tweaks_feature('jcarousel.fix_resize_bug')) {
+    $jcarousel = drupal_get_path('module', 'jcarousel') .'/js/jquery.jcarousel.min.js';
+
+    if (isset($javascript[$jcarousel])) {
+      $javascript[$jcarousel]['data'] = "$module/js/jquery.jcarousel.min.js";
+    }
+  }
+}
+
+/**
+ * Implements hook_library_alter().
+ */
+function sebd7tweaks_library_alter(&$libraries, $module) {
+  /**
+   * Required to add our css enhancement and also apply a patch on linkit.js to populate title
+   * http://drupal.org/files/linkit-populate-title-attribute-7.patch
+   */
+  if ($module == 'linkit' && sebd7tweaks_feature('linkit.enhance_dashboard')) {
+    $sebd7tweaks = drupal_get_path('module', 'sebd7tweaks');
+    $origin      = drupal_get_path('module', 'linkit') .'/js/linkit.js';
+    $value       = $libraries['linkit_base']['js'][$origin];
+    // Remove original JS
+    unset($libraries['linkit_base']['js'][$origin]);
+    // Add our own as replacement
+    $libraries['linkit_base']['js'] = array("$sebd7tweaks/js/linkit.js" => $value) + $libraries['linkit_base']['js'];
+    $libraries['linkit_base']['css']["$sebd7tweaks/css/enhance-linkit.css"] = array('group' => CSS_DEFAULT);
+  }
+}
+
+/**
+ * Implements hook_flush_caches().
+ */
+function sebd7tweaks_flush_caches() {
+  /**
+   * This function ensure the views cache is really cleared when cache is flushed...
+   * It should be the case, but I've seen that sometimes, views in code are not read!!!
+   * This is a fucking bug which can break pages so I prefer to be secure with it.
+   */
+  if (sebd7tweaks_feature('views.prevent_cache_bug')) {
+    static $done = FALSE;
+    // Not supposed to be called twice but to prevent an infinite loop if views code change...
+    if (!$done) {
+      $done = TRUE;
+      views_invalidate_cache();
+    }
+  }
+}
+
+/**
+ * Implements hook_admin_paths_alter().
+ */
+function sebd7tweaks_admin_paths_alter(&$paths) {
+  if (sebd7tweaks_feature('overlay.disable_user')) {
+    foreach (array('user/*/edit', 'user/*/edit/*', 'admin/people/create') as $path) {
+      $paths[$path] = FALSE;
+    }
+  }
+  if (sebd7tweaks_feature('revisioning.summary_admin_path')) {
+    $paths['content-summary'] = TRUE;
+  }
+  // @see _sebd7tweaks_menu_alter_book() + @see sebd7tweaks_book_outline()
+  if (sebd7tweaks_feature('book.tweak_outline')) {
+    $paths['node/*/outline'] = TRUE;
+  }
+}
+
+##### Hooks relative to VIEWS
+
+/**
+ * Implementation of hook_views_api().
+ */
+function sebd7tweaks_views_api() {
+  // Minimal infos --> means all views' hooks implementations are into sebd7tweaks.views.inc
+  return array('api' => '3.0');
+}
+
+####################
+# Custom callbacks #
+####################
+
+/**
+ * Title callback: Replacement of user_page_title() to use username like the theme display it (wihout HTML of course)
+ */
+function sebd7tweaks_user_page_title($account) {
+  return is_object($account)? strip_tags(theme('username', array('account' => $account))): '';
+}
+
+/**
+ * Access callback: Hide unnecessary menu.
+ */
+function sebd7tweaks_menu_access($menu, $action) {
+  static $disabled = FALSE;
+
+  if ($disabled === FALSE) {
+    $disabled = variable_get('sebd7tweaks_disabled_menu_actions', array());
+  }
+
+  return !isset($disabled["{$menu['menu_name']}__$action"]) && user_access('administer menu');
+}
+
+/**
+ * Access callback: Refine access to taxonomy related actions.
+ */
+function sebd7tweaks_taxonomy_access($taxonomy, $action) {
+  if (user_access('administer taxonomy')) {
+    return TRUE;
+  }
+  // To be able working with menu objects and overview page...
+  $taxonomy = (array) $taxonomy;
+  // We consider "edit" action only for the previous permission
+  switch ($action) {
+    // This doesn't exist in taxonomy permissions, but if the user can edit or delete... He should obviously list and add items!
+    case 'list':
+    case 'item_add':
+      return user_access("edit terms in {$taxonomy['vid']}") || user_access("delete terms in {$taxonomy['vid']}");
+  }
+  // By default, deny access
+  return FALSE;
+}
+
+/**
+ * Access callback: Refine access to term pages.
+ */
+function sebd7tweaks_term_access($term) {
+  static $disabled = FALSE;
+
+  if ($disabled === FALSE) {
+    $disabled = variable_get('sebd7tweaks_disabled_term_access', array());
+  }
+
+  return !isset($disabled[$term->vid]) && user_access('access content');
+}
+
+/**
+ * Access callback: Only allow "outline" tab for node types that are configured to use a structure.
+ */
+function sebd7tweaks_book_outline_access($node) {
+  return _book_outline_access($node) && book_type_is_allowed($node->type);
+}
+
+#####################
+# Theming functions #
+#####################
+
+/**
+ * Theming function: Fix node list order in page /node/add by using transliterate on node types.
+ */
+function template_preprocess_node_add_list(&$vars) {
+  if (sebd7tweaks_feature('node.i18n_node_list') && module_exists('transliteration')) {
+    $items = array();
+
+    foreach ($vars['content'] as $key => $item) {
+      $items[transliteration_get($key)] = $item;
+    }
+
+    ksort($items);
+    $vars['content'] = $items;
+  }
+}
+
